@@ -9,7 +9,7 @@ from scipy.special import logsumexp
 from numba import njit
 from mpi4py import MPI
 
-# Functions for the State Evolution loop functions
+# Basic math functions for the State Evolution loop functions
 
 def Softplus(x):
     return logsumexp([0, x])
@@ -30,7 +30,7 @@ def DDzLoss(y, z):
 
 def Prox(mu, Omega, f):
     ToOptimize = lambda x: np.einsum("i,ij,j->",(x - mu),linalg.inv(Omega), (x - mu))/2 + f(x)
-    Prox = minimize(ToOptimize, x0=[0, 0])
+    Prox = minimize(ToOptimize, x0=mu)
     return Prox.x
 
 def T(mhat, qhat, chihat, W, xi):
@@ -79,7 +79,7 @@ def HatFuncs(sigma, z, w, A):
     chihat = Domega_gout(Optimizedz, y, sigma)
     return qhat, mhat, chihat
 
-# State Evolution sampling functions
+# State Evolution sampling functions for the expectation
 
 def TrueRandSampleReal():
     W = rnd.normal(0, 1, 2)
@@ -99,19 +99,26 @@ def TrueRandExpectReal(mhat, qhat, chihat, Lambda, Nsample):
     size = comm.Get_size()
     local_N = Nsample // size
     m, q, sigma = np.zeros((2, 2)), np.zeros((2, 2)), np.zeros((2, 2))
+    m2, q2 = np.zeros((2, 2)), np.zeros((2, 2))
     for _ in range(local_N):
         W, xi = TrueRandSampleReal()
         newm, newq, newsigma = RealFuncs(mhat, qhat, chihat, W, xi, Lambda)
         m += newm
+        m2 += np.square(newm)
         q += newq
+        q2 += np.square(newq)
         sigma += newsigma
     m_global = np.zeros_like(m)
+    m2_global = np.zeros_like(m2)
     q_global = np.zeros_like(q)
+    q2_global = np.zeros_like(q2)
     sigma_global = np.zeros_like(sigma)
     comm.Allreduce(m, m_global, op=MPI.SUM)
+    comm.Allreduce(m2, m2_global, op=MPI.SUM)
     comm.Allreduce(q, q_global, op=MPI.SUM)
+    comm.Allreduce(q2, q2_global, op=MPI.SUM)
     comm.Allreduce(sigma, sigma_global, op=MPI.SUM)
-    return m_global/Nsample, q_global/Nsample, sigma_global/Nsample
+    return m_global/Nsample, (m2_global - np.square(m_global)/Nsample)/(Nsample - 1), q_global/Nsample, (q2_global - np.square(q_global)/Nsample)/(Nsample - 1), sigma_global/Nsample
 
 def TrueRandExpectHat(q, m, sigma, alpha, Nsample):
     comm = MPI.COMM_WORLD
@@ -148,7 +155,7 @@ def TrueRandSE_ERM(alpha, Lambda, q0, m0, sigma0, Damping, Nsample, MaxIter, Eps
         IterStart = time.time()
         newqhat, newmhat, newchihat = TrueRandExpectHat(q, m, sigma, alpha, Nsample)
         qhat, mhat, chihat = Damping*qhat + (1-Damping)*newqhat, Damping*mhat + (1-Damping)*newmhat, Damping*chihat + (1-Damping)*newchihat
-        newm, newq, newsigma = TrueRandExpectReal(mhat, qhat, chihat, Lambda, Nsample)
+        newm, varm, newq, varq, newsigma = TrueRandExpectReal(mhat, qhat, chihat, Lambda, Nsample)
         Conv = (np.abs(q[0,0] - newq[0,0]) + np.abs(q[1,1] - newq[1,1]))/(np.abs(newq[0,0]) + np.abs(newq[1,1]))
         m, q, sigma = Damping*m + (1-Damping)*newm, Damping*q + (1-Damping)*newq, Damping*sigma + (1-Damping)*newsigma
         IterEnd = time.time()
@@ -166,7 +173,7 @@ def TrueRandSE_ERM(alpha, Lambda, q0, m0, sigma0, Damping, Nsample, MaxIter, Eps
             print("Eigenvalues of Q", linalg.eigvals(np.vstack([np.hstack([np.eye(2), m]), np.hstack([m, q])])), flush=True)
             print("Iteration time : ", IterTime, flush=True)
         NIter += 1
-    return q, m, sigma
+    return q, varq, m, varm
 
 def main():
     comm = MPI.COMM_WORLD
@@ -190,12 +197,12 @@ def main():
         print("Running State Evolution with MPI", flush=True)
         print(f"Parameters: alpha={args.alpha}, Lambda={args.Lambda}, Nsample={args.Nsample}", flush=True)
 
-    q0 = np.array([[1, 0], [0, 0.81]])#0.5*np.eye(2)
-    m0 = np.array([[0.95, 0], [0, 0.75]])#0.2*np.eye(2)
+    q0 = np.array([[0.85, 0], [0, 0.53]])#0.5*np.eye(2)
+    m0 = np.array([[0.86, 0], [0, 0.433]])#0.2*np.eye(2)
     sigma0 = 0.5*np.eye(2)
 
     # Run the State Evolution algorithm
-    q, m, sigma = TrueRandSE_ERM(args.alpha, args.Lambda, q0, m0, sigma0, Damping = args.Damping, Nsample = args.Nsample, MaxIter = args.MaxIter,
+    q, varq, m, varm = TrueRandSE_ERM(args.alpha, args.Lambda, q0, m0, sigma0, Damping = args.Damping, Nsample = args.Nsample, MaxIter = args.MaxIter,
                                 EpsConvergence = args.EpsConvergence, Verbose = args.Verbose, VerboseRate = args.VerboseRate,
                                 DebugVerbose = args.Debug)
 
@@ -203,11 +210,11 @@ def main():
         print("Final Results:")
         print("q =\n", q)
         print("m =\n", m)
-        print("sigma =\n", sigma)
     
-    np.savetxt("q.txt", q, fmt="%.6f")
-    np.savetxt("m.txt", m, fmt="%.6f")
-    np.savetxt("sigma.txt", sigma, fmt="%.6f")
+    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}.txt", q, fmt="%.6f")
+    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}.txt",  varq, fmt="%.6f")
+    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}.txt", m, fmt="%.6f")
+    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}.txt",  varm, fmt="%.6f")
 
 if __name__ == "__main__":
     main()
