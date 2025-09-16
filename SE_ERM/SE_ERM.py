@@ -26,12 +26,12 @@ def Loss(y, z):
 def DDzLoss(y, z):
     Sz = Softplus(z[1])
     Dsz = DSoftplus(z[1])
-    return np.array([[1/Sz, (y - z[0])*Dsz/(Sz*Sz)],[(y - z[0])*Dsz/(Sz*Sz), (Sz*DDSoftplus(z[1])*(Sz - (y - z[0])*(y - z[0])) + Dsz*Dsz*(2*(y - z[0])*(y - z[0]) - Sz))/(2*Sz*Sz*Sz)]])
+    return np.array([[1/Sz, (y - z[0])*Dsz/(Sz*Sz)],[(y - z[0])*Dsz/(Sz*Sz), ((2*Dsz*Dsz - Sz*DDSoftplus(z[1]))*((y - z[0])*(y - z[0]) - Sz) + Dsz*Dsz*Sz)/(2*Sz*Sz*Sz)]])
 
 def Prox(mu, Omega, f):
     ToOptimize = lambda x: np.einsum("i,ij,j->",(x - mu),linalg.inv(Omega), (x - mu))/2 + f(x)
-    Prox = minimize(ToOptimize, x0=mu)
-    return Prox.x
+    Proximal = minimize(ToOptimize, x0=mu)
+    return Proximal.x
 
 def T(mhat, qhat, chihat, W, xi):
     sqrtqhat = sqrtm(qhat).real
@@ -47,7 +47,7 @@ def phi(z, A):
     return z[0] + A*np.sqrt(Softplus(z[1]))
 
 def Dz_phi(z, A):
-    return np.array([1, np.divide(A*DSoftplus(z[1]), 2*np.sqrt(Softplus(z[1])))])
+    return np.array([1, A*np.divide(DSoftplus(z[1]), 2*np.sqrt(Softplus(z[1])))])
 
 def gout(zStar, w, V):
     return linalg.inv(V) @ (zStar - w)
@@ -60,7 +60,7 @@ def Dy_gout(zStar, y, V):
     InvV = linalg.inv(V)
     Sz = Softplus(zStar[1])
     Dsz = DSoftplus(zStar[1])
-    return InvV @ (linalg.inv(InvV + DDzLoss(y, zStar)) @ np.array([1/Sz, (Dsz*(y - zStar[0]))/(Sz*Sz)]))
+    return InvV @ (linalg.inv(InvV + DDzLoss(y, zStar)) @ np.array([1/Sz, Dsz*(y - zStar[0])/(Sz*Sz)]))
 
 # State Evolution Loop functions
 
@@ -73,11 +73,11 @@ def RealFuncs(mhat, qhat, chihat, W, xi, Lambda):
 
 def HatFuncs(sigma, z, w, A):
     y = phi(z, A)
-    Optimizedz = Prox(w, sigma, lambda z: Loss(y, z))
+    Optimizedz = Prox(w, sigma, lambda zToOptimize: Loss(y, zToOptimize))
     qhat = np.einsum("i,j->ij", gout(Optimizedz, w, sigma), gout(Optimizedz, w, sigma))
     mhat = np.einsum("i,j->ij", Dy_gout(Optimizedz, y, sigma), Dz_phi(z, A))
-    chihat = Domega_gout(Optimizedz, y, sigma)
-    return qhat, mhat, chihat
+    minuschihat = Domega_gout(Optimizedz, y, sigma)
+    return qhat, mhat, minuschihat
 
 # State Evolution sampling functions for the expectation
 
@@ -89,7 +89,7 @@ def TrueRandSampleReal():
 def TrueRandSampleHat(L):
     zw = L @ rnd.normal(0, 1, 4)
     A = rnd.normal(0, 1)
-    return np.array([zw[0], zw[1]]), np.array([zw[2], zw[3]]), A
+    return np.array([zw[2], zw[3]]), np.array([zw[0], zw[1]]), A
 
 # State Evolution Expectation functions
 
@@ -108,16 +108,11 @@ def TrueRandExpectReal(mhat, qhat, chihat, Lambda, Nsample):
         q += newq
         q2 += np.square(newq)
         sigma += newsigma
-    m_global = np.zeros_like(m)
-    m2_global = np.zeros_like(m2)
-    q_global = np.zeros_like(q)
-    q2_global = np.zeros_like(q2)
-    sigma_global = np.zeros_like(sigma)
-    comm.Allreduce(m, m_global, op=MPI.SUM)
-    comm.Allreduce(m2, m2_global, op=MPI.SUM)
-    comm.Allreduce(q, q_global, op=MPI.SUM)
-    comm.Allreduce(q2, q2_global, op=MPI.SUM)
-    comm.Allreduce(sigma, sigma_global, op=MPI.SUM)
+    m_global = comm.allreduce(m, op=MPI.SUM)
+    m2_global = comm.allreduce(m2, op=MPI.SUM)
+    q_global = comm.allreduce(q, op=MPI.SUM)
+    q2_global = comm.allreduce(q2, op=MPI.SUM)
+    sigma_global = comm.allreduce(sigma, op=MPI.SUM)
     return m_global/Nsample, (m2_global - np.square(m_global)/Nsample)/(Nsample - 1), q_global/Nsample, (q2_global - np.square(q_global)/Nsample)/(Nsample - 1), sigma_global/Nsample
 
 def TrueRandExpectHat(q, m, sigma, alpha, Nsample):
@@ -129,16 +124,13 @@ def TrueRandExpectHat(q, m, sigma, alpha, Nsample):
     L = linalg.cholesky(np.vstack([np.hstack([np.eye(2), m]), np.hstack([m, q])]) + 1e-4*np.eye(4))
     for _ in range(local_N):
         z, w, A = TrueRandSampleHat(L)
-        newqhat, newmhat, newchihat = HatFuncs(sigma, z, w, A)
+        newqhat, newmhat, newminuschihat = HatFuncs(sigma, z, w, A)
         qhat += newqhat
         mhat += newmhat
-        chihat -= newchihat
-    qhat_global = np.zeros_like(qhat)
-    mhat_global = np.zeros_like(mhat)
-    chihat_global = np.zeros_like(chihat)
-    comm.Allreduce(qhat, qhat_global, op=MPI.SUM)
-    comm.Allreduce(mhat, mhat_global, op=MPI.SUM)
-    comm.Allreduce(chihat, chihat_global, op=MPI.SUM)
+        chihat -= newminuschihat
+    qhat_global = comm.allreduce(qhat, op=MPI.SUM)
+    mhat_global = comm.allreduce(mhat, op=MPI.SUM)
+    chihat_global = comm.allreduce(chihat, op=MPI.SUM)
     return alpha*qhat_global/Nsample, alpha*mhat_global/Nsample, alpha*chihat_global/Nsample
 
 # State Evolution runner
@@ -197,11 +189,12 @@ def main():
         print("Running State Evolution with MPI", flush=True)
         print(f"Parameters: alpha={args.alpha}, Lambda={args.Lambda}, Nsample={args.Nsample}", flush=True)
 
-    q0 = np.array([[0.85, 0], [0, 0.53]])#0.5*np.eye(2)
-    m0 = np.array([[0.86, 0], [0, 0.433]])#0.2*np.eye(2)
+    q0 = np.array([[0.64, 0.01], [0.01, 0.23]])#0.5*np.eye(2)
+    m0 = np.array([[0.64, 0.01], [0.01, 0.16]])#0.2*np.eye(2)
     sigma0 = 0.5*np.eye(2)
 
     # Run the State Evolution algorithm
+    StartTime = time.time()
     q, varq, m, varm = TrueRandSE_ERM(args.alpha, args.Lambda, q0, m0, sigma0, Damping = args.Damping, Nsample = args.Nsample, MaxIter = args.MaxIter,
                                 EpsConvergence = args.EpsConvergence, Verbose = args.Verbose, VerboseRate = args.VerboseRate,
                                 DebugVerbose = args.Debug)
@@ -210,11 +203,12 @@ def main():
         print("Final Results:")
         print("q =\n", q)
         print("m =\n", m)
+        print("Elapsed time : ", StartTime - time.time())
     
-    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}.txt", q, fmt="%.6f")
-    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}.txt",  varq, fmt="%.6f")
-    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}.txt", m, fmt="%.6f")
-    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}.txt",  varm, fmt="%.6f")
+    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt", q, fmt="%.6f")
+    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt",  varq, fmt="%.6f")
+    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt", m, fmt="%.6f")
+    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt",  varm, fmt="%.6f")
 
 if __name__ == "__main__":
     main()
