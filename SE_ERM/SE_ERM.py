@@ -28,9 +28,9 @@ def DDzLoss(y, z):
     Dsz = DSoftplus(z[1])
     return np.array([[1/Sz, (y - z[0])*Dsz/(Sz*Sz)],[(y - z[0])*Dsz/(Sz*Sz), ((2*Dsz*Dsz - Sz*DDSoftplus(z[1]))*((y - z[0])*(y - z[0]) - Sz) + Dsz*Dsz*Sz)/(2*Sz*Sz*Sz)]])
 
-def Prox(mu, Omega, f):
+def Prox(mu, Omega, f, StartPoint):
     ToOptimize = lambda x: np.einsum("i,ij,j->",(x - mu),linalg.inv(Omega), (x - mu))/2 + f(x)
-    Proximal = minimize(ToOptimize, x0=mu)
+    Proximal = minimize(ToOptimize, x0=StartPoint)
     return Proximal.x
 
 def T(mhat, qhat, chihat, W, xi):
@@ -71,12 +71,36 @@ def RealFuncs(mhat, qhat, chihat, W, xi, Lambda):
     sigma = fc(chihat, Lambda)
     return m, q, sigma
 
-def HatFuncs(sigma, z, w, A):
+def HatFuncsOriginal(sigma, z, w, A):
     y = phi(z, A)
-    Optimizedz = Prox(w, sigma, lambda zToOptimize: Loss(y, zToOptimize))
+    Optimizedz = Prox(w, sigma, lambda zToOptimize: Loss(y, zToOptimize), z)
     qhat = np.einsum("i,j->ij", gout(Optimizedz, w, sigma), gout(Optimizedz, w, sigma))
     mhat = np.einsum("i,j->ij", Dy_gout(Optimizedz, y, sigma), Dz_phi(z, A))
     minuschihat = Domega_gout(Optimizedz, y, sigma)
+    return qhat, mhat, minuschihat
+
+def HatFuncsSteins(sigma, z, w, A, SigmaInv):
+    gOut = gout(Prox(w, sigma, lambda zToOptimize: Loss(phi(z, A), zToOptimize), z), w, sigma)
+    SteinsExtraTerm = np.einsum("ij,j->i", SigmaInv, np.hstack([z, w]))
+    qhat = np.einsum("i,j->ij", gOut , gOut)
+    mhat = np.einsum("i,j->ij", gOut, SteinsExtraTerm[0:2])
+    minuschihat = np.einsum("i,j->ij", gOut, SteinsExtraTerm[2:4])
+    return qhat, mhat, minuschihat
+
+def HatFuncsFiniteDifferences(sigma, z, w, A):
+    DiffEps = 1e-5
+    gOut = gout(Prox(w, sigma, lambda zToOptimize: Loss(phi(z, A), zToOptimize), z), w, sigma)
+    z0 = z + np.array([DiffEps, 0])
+    gOutz0 = gout(Prox(w, sigma, lambda zToOptimize: Loss(phi(z0, A), zToOptimize), z0), w, sigma)
+    z1 = z + np.array([0, DiffEps])
+    gOutz1 = gout(Prox(w, sigma, lambda zToOptimize: Loss(phi(z1, A), zToOptimize), z1), w, sigma)
+    w0 = w + np.array([DiffEps, 0])
+    gOutw0 = gout(Prox(w0, sigma, lambda zToOptimize: Loss(phi(z, A), zToOptimize), z), w0, sigma)
+    w1 = w + np.array([0, DiffEps])
+    gOutw1 = gout(Prox(w1, sigma, lambda zToOptimize: Loss(phi(z, A), zToOptimize), z), w1, sigma)
+    qhat = np.einsum("i,j->ij", gOut , gOut)
+    mhat = np.array([[(gOutz0[0]-gOut[0]),(gOutz1[0]-gOut[0])],[(gOutz0[1]-gOut[1]),(gOutz1[1]-gOut[1])]])/DiffEps
+    minuschihat = np.array([[(gOutw0[0]-gOut[0]),(gOutw1[0]-gOut[0])],[(gOutw0[1]-gOut[1]),(gOutw1[1]-gOut[1])]])/DiffEps
     return qhat, mhat, minuschihat
 
 # State Evolution sampling functions for the expectation
@@ -89,13 +113,12 @@ def TrueRandSampleReal():
 def TrueRandSampleHat(L):
     zw = L @ rnd.normal(0, 1, 4)
     A = rnd.normal(0, 1)
-    return np.array([zw[2], zw[3]]), np.array([zw[0], zw[1]]), A
+    return np.array([zw[0], zw[1]]), np.array([zw[2], zw[3]]), A
 
 # State Evolution Expectation functions
 
 def TrueRandExpectReal(mhat, qhat, chihat, Lambda, Nsample):
     comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
     size = comm.Get_size()
     local_N = Nsample // size
     m, q, sigma = np.zeros((2, 2)), np.zeros((2, 2)), np.zeros((2, 2))
@@ -117,14 +140,19 @@ def TrueRandExpectReal(mhat, qhat, chihat, Lambda, Nsample):
 
 def TrueRandExpectHat(q, m, sigma, alpha, Nsample):
     comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
     size = comm.Get_size()
     local_N = Nsample // size
     qhat, mhat, chihat = np.zeros((2, 2)), np.zeros((2, 2)), np.zeros((2, 2))
-    L = linalg.cholesky(np.vstack([np.hstack([np.eye(2), m]), np.hstack([m, q])]) + 1e-4*np.eye(4))
+    Sigma = np.vstack([np.hstack([np.eye(2), m]), np.hstack([m, q])]) + 1e-4*np.eye(4)
+    L = linalg.cholesky(Sigma)
     for _ in range(local_N):
         z, w, A = TrueRandSampleHat(L)
-        newqhat, newmhat, newminuschihat = HatFuncs(sigma, z, w, A)
+        # Normal Calculations
+        #newqhat, newmhat, newminuschihat = HatFuncsOriginal(sigma, z, w, A)
+        # With Stein's Lemma
+        newqhat, newmhat, newminuschihat = HatFuncsSteins(sigma, z, w, A, linalg.inv(Sigma))
+        # With Finite Differences
+        #newqhat, newmhat, newminuschihat = HatFuncsFiniteDifferences(sigma, z, w, A)
         qhat += newqhat
         mhat += newmhat
         chihat -= newminuschihat
@@ -203,7 +231,7 @@ def main():
         print("Final Results:")
         print("q =\n", q)
         print("m =\n", m)
-        print("Elapsed time : ", StartTime - time.time())
+        print("Elapsed time : ", time.time() - StartTime)
     
     np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt", q, fmt="%.6f")
     np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt",  varq, fmt="%.6f")
