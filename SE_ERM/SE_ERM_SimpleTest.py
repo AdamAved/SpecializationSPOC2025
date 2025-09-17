@@ -206,10 +206,10 @@ def main():
         print("m =\n", m)
         print("Elapsed time : ", time.time() - StartTime)
     
-    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt", q, fmt="%.6f")
-    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt",  varq, fmt="%.6f")
-    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt", m, fmt="%.6f")
-    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt",  varm, fmt="%.6f")
+    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SimpleTest.txt", q, fmt="%.6f")
+    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SimpleTest.txt",  varq, fmt="%.6f")
+    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SimpleTest.txt", m, fmt="%.6f")
+    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SimpleTest.txt",  varm, fmt="%.6f")
 
 if __name__ == "__main__":
     main()
