@@ -5,31 +5,17 @@ import time
 import argparse
 from scipy.linalg import sqrtm
 from scipy.optimize import minimize
-from scipy.special import logsumexp
+from scipy.special import softplus
 from numba import njit
 from mpi4py import MPI
 
 # Basic math functions for the State Evolution loop functions
 
-def Softplus(x):
-    return logsumexp([0, x])
-
-def DSoftplus(x):
-    return np.exp(-logsumexp([0, -x]))
-
-def DDSoftplus(x):
-    return np.exp(-x -2*logsumexp([0, -x]))
-
 def Loss(y, z):
-    return ((y - z[0])*(y - z[0])/(2*Softplus(z[1])) + np.log(Softplus(z[1])))/2
-
-def DDzLoss(y, z):
-    Sz = Softplus(z[1])
-    Dsz = DSoftplus(z[1])
-    return np.array([[1/Sz, (y - z[0])*Dsz/(Sz*Sz)],[(y - z[0])*Dsz/(Sz*Sz), ((2*Dsz*Dsz - Sz*DDSoftplus(z[1]))*((y - z[0])*(y - z[0]) - Sz) + Dsz*Dsz*Sz)/(2*Sz*Sz*Sz)]])
+    return ((y - z[0])*(y - z[0])/(softplus(z[1])) + np.log(softplus(z[1])))/2
 
 def Prox(mu, Omega, f, StartPoint):
-    ToOptimize = lambda x: np.einsum("i,ij,j->",(x - mu),linalg.inv(Omega), (x - mu))/2 + f(x)
+    ToOptimize = lambda x: np.einsum("i,ij,j->",(x - mu), linalg.inv(Omega), (x - mu))/2 + f(x)
     Proximal = minimize(ToOptimize, x0=StartPoint)
     return Proximal.x
 
@@ -44,23 +30,10 @@ def fc(SigmaInv, Lambda):
     return linalg.inv(SigmaInv + Lambda*np.eye(2))
 
 def phi(z, A):
-    return z[0] + A*np.sqrt(Softplus(z[1]))
-
-def Dz_phi(z, A):
-    return np.array([1, A*np.divide(DSoftplus(z[1]), 2*np.sqrt(Softplus(z[1])))])
+    return z[0] + A*np.sqrt(softplus(z[1]))
 
 def gout(zStar, w, V):
     return linalg.inv(V) @ (zStar - w)
-
-def Domega_gout(zStar, y, V):
-    InvV = linalg.inv(V)
-    return InvV @ (linalg.inv(InvV + DDzLoss(y, zStar)) @ InvV - np.eye(2))
-
-def Dy_gout(zStar, y, V):
-    InvV = linalg.inv(V)
-    Sz = Softplus(zStar[1])
-    Dsz = DSoftplus(zStar[1])
-    return InvV @ (linalg.inv(InvV + DDzLoss(y, zStar)) @ np.array([1/Sz, Dsz*(y - zStar[0])/(Sz*Sz)]))
 
 # State Evolution Loop functions
 
@@ -71,36 +44,12 @@ def RealFuncs(mhat, qhat, chihat, W, xi, Lambda):
     sigma = fc(chihat, Lambda)
     return m, q, sigma
 
-def HatFuncsOriginal(sigma, z, w, A):
-    y = phi(z, A)
-    Optimizedz = Prox(w, sigma, lambda zToOptimize: Loss(y, zToOptimize), z)
-    qhat = np.einsum("i,j->ij", gout(Optimizedz, w, sigma), gout(Optimizedz, w, sigma))
-    mhat = np.einsum("i,j->ij", Dy_gout(Optimizedz, y, sigma), Dz_phi(z, A))
-    minuschihat = Domega_gout(Optimizedz, y, sigma)
-    return qhat, mhat, minuschihat
-
 def HatFuncsSteins(sigma, z, w, A, SigmaInv):
     gOut = gout(Prox(w, sigma, lambda zToOptimize: Loss(phi(z, A), zToOptimize), z), w, sigma)
     SteinsExtraTerm = np.einsum("ij,j->i", SigmaInv, np.hstack([z, w]))
     qhat = np.einsum("i,j->ij", gOut , gOut)
     mhat = np.einsum("i,j->ij", gOut, SteinsExtraTerm[0:2])
     minuschihat = np.einsum("i,j->ij", gOut, SteinsExtraTerm[2:4])
-    return qhat, mhat, minuschihat
-
-def HatFuncsFiniteDifferences(sigma, z, w, A):
-    DiffEps = 1e-5
-    gOut = gout(Prox(w, sigma, lambda zToOptimize: Loss(phi(z, A), zToOptimize), z), w, sigma)
-    z0 = z + np.array([DiffEps, 0])
-    gOutz0 = gout(Prox(w, sigma, lambda zToOptimize: Loss(phi(z0, A), zToOptimize), z0), w, sigma)
-    z1 = z + np.array([0, DiffEps])
-    gOutz1 = gout(Prox(w, sigma, lambda zToOptimize: Loss(phi(z1, A), zToOptimize), z1), w, sigma)
-    w0 = w + np.array([DiffEps, 0])
-    gOutw0 = gout(Prox(w0, sigma, lambda zToOptimize: Loss(phi(z, A), zToOptimize), z), w0, sigma)
-    w1 = w + np.array([0, DiffEps])
-    gOutw1 = gout(Prox(w1, sigma, lambda zToOptimize: Loss(phi(z, A), zToOptimize), z), w1, sigma)
-    qhat = np.einsum("i,j->ij", gOut , gOut)
-    mhat = np.array([[(gOutz0[0]-gOut[0]),(gOutz1[0]-gOut[0])],[(gOutz0[1]-gOut[1]),(gOutz1[1]-gOut[1])]])/DiffEps
-    minuschihat = np.array([[(gOutw0[0]-gOut[0]),(gOutw1[0]-gOut[0])],[(gOutw0[1]-gOut[1]),(gOutw1[1]-gOut[1])]])/DiffEps
     return qhat, mhat, minuschihat
 
 # State Evolution sampling functions for the expectation
@@ -147,12 +96,7 @@ def TrueRandExpectHat(q, m, sigma, alpha, Nsample):
     L = linalg.cholesky(Sigma)
     for _ in range(local_N):
         z, w, A = TrueRandSampleHat(L)
-        # Normal Calculations
-        #newqhat, newmhat, newminuschihat = HatFuncsOriginal(sigma, z, w, A)
-        # With Stein's Lemma
         newqhat, newmhat, newminuschihat = HatFuncsSteins(sigma, z, w, A, linalg.inv(Sigma))
-        # With Finite Differences
-        #newqhat, newmhat, newminuschihat = HatFuncsFiniteDifferences(sigma, z, w, A)
         qhat += newqhat
         mhat += newmhat
         chihat -= newminuschihat
@@ -233,10 +177,10 @@ def main():
         print("m =\n", m)
         print("Elapsed time : ", time.time() - StartTime)
     
-    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt", q, fmt="%.6f")
-    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt",  varq, fmt="%.6f")
-    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt", m, fmt="%.6f")
-    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_square.txt",  varm, fmt="%.6f")
+    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt", q, fmt="%.6f")
+    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt",  varq, fmt="%.6f")
+    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt", m, fmt="%.6f")
+    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt",  varm, fmt="%.6f")
 
 if __name__ == "__main__":
     main()
