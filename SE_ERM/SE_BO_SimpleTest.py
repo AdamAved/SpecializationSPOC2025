@@ -11,34 +11,17 @@ from mpi4py import MPI
 
 # Basic math functions for the State Evolution loop functions
 
-def Pout(z, y):
-    return (norm(loc = z[0], scale = np.sqrt(softplus(z[1])))).pdf(y)
-
-def DistwVout(z, w, V):
-    return (multivariate_normal(mean = w, cov = V)).pdf(z)
-
-def Integrand_Zout(z0, z1, y, w, V):
-    z = np.array([z0, z1])
-    return Pout(z, y)*DistwVout(z, w, V)
-
-def Z_out(y, w, V, IntBoundaries):
-    return nquad(Integrand_Zout, [[-IntBoundaries, IntBoundaries],[-IntBoundaries, IntBoundaries]], args=(y, w, V))[0]
-    
-def Integrand_z_avg(z0, z1, y, w, V, nComponent):
-    z = np.array([z0, z1])
-    return (z*Pout(z, y)*DistwVout(z, w, V))[nComponent]
-
-def z_avg_out(y, w, V, IntBoundaries):
-    return np.array([nquad(Integrand_z_avg, [[-IntBoundaries, IntBoundaries],[-IntBoundaries, IntBoundaries]], args=(y, w, V, i))[0] for i in range(2)]) / Z_out(y, w, V, IntBoundaries)
+def z_avg_out(y, w, V):
+    return np.array([V[1,1]*w[0] + V[0,0]*(y - w[1]) + V[0,1]*(w[0] + y - w[1]), V[0,0]*w[1] + V[1,1]*(y - w[0]) + V[0,1]*(w[1] + y - w[0])])/np.sum(V)
 
 def T(qhat, W, xi):
-    return W + sqrtm(qhat).real @ xi
+    return W + sqrtm(linalg.inv(qhat)).real @ xi
 
 def fw(R, SigmaInv):
     return linalg.inv(SigmaInv + np.eye(2)) @ SigmaInv @ R
 
 def phi(z, A):
-    return z[0] + A*np.sqrt(softplus(z[1]))
+    return z[0] + z[1]
 
 def gout(z_avg, w, V):
     return linalg.inv(V) @ (z_avg - w)
@@ -51,7 +34,7 @@ def RealFuncs(qhat, W, xi):
     return q
 
 def HatFuncs(sigma, z, w, A, IntBoundaries):
-    gOut = gout(z_avg_out(phi(z, A), w, sigma, IntBoundaries), w, sigma)
+    gOut = gout(z_avg_out(phi(z,A), w, sigma), w, sigma)
     qhat = np.einsum("i,j->ij", gOut , gOut)
     return qhat
 
@@ -164,11 +147,10 @@ def main():
     if rank == 0:
         print("Final Results:")
         print("q =\n", q)
-        print("m =\n", m)
         print("Elapsed time : ", time.time() - StartTime)
     
-    np.savetxt(f"q_alpha_{args.alpha}_Samples_{args.Nsample}_SE_BO.txt", q, fmt="%.6f")
-    np.savetxt(f"varq_alpha_{args.alpha}_Samples_{args.Nsample}_SE_BO.txt",  varq, fmt="%.6f")
+    np.savetxt(f"q_alpha_{args.alpha}_Samples_{args.Nsample}_SE_BO_SimpleTest.txt", q, fmt="%.6f")
+    np.savetxt(f"varq_alpha_{args.alpha}_Samples_{args.Nsample}_SE_BO_SimpleTest.txt",  varq, fmt="%.6f")
 
 if __name__ == "__main__":
     main()
