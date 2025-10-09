@@ -12,7 +12,8 @@ from mpi4py import MPI
 # Basic math functions for the State Evolution loop functions
 
 def z_avg_out(y, w, V):
-    return np.array([V[1,1]*w[0] + V[0,0]*(y - w[1]) + V[0,1]*(w[0] + y - w[1]), V[0,0]*w[1] + V[1,1]*(y - w[0]) + V[0,1]*(w[1] + y - w[0])])/np.sum(V)
+#    return np.array([V[1,1]*w[0] + V[0,0]*(y - w[1]) + V[0,1]*(w[0] + y - w[1]), V[0,0]*w[1] + V[1,1]*(y - w[0]) + V[0,1]*(w[1] + y - w[0])])/np.sum(V)
+    return np.array([y, w[1] + V[0,1]*(y - w[0])/V[0,0]])
 
 def T(qhat, W, xi):
     return W + sqrtm(linalg.inv(qhat)).real @ xi
@@ -21,6 +22,7 @@ def fw(R, SigmaInv):
     return linalg.inv(SigmaInv + np.eye(2)) @ SigmaInv @ R
 
 def phi(z, A):
+#    return z[0] + z[1]
     return z[0] + z[1]
 
 def gout(z_avg, w, V):
@@ -73,7 +75,7 @@ def TrueRandExpectHat(q, alpha, Nsample, IntBoundaries):
     local_N = Nsample // size
     sigma = np.eye(2) - q
     qhat = np.zeros((2, 2))
-    Sigma = np.vstack([np.hstack([np.eye(2), q]), np.hstack([q, q])]) + 1e-4*np.eye(4)
+    Sigma = np.vstack([np.hstack([np.eye(2), q]), np.hstack([q, q])]) + 5e-4*np.eye(4)
     L = linalg.cholesky(Sigma)
     for _ in range(local_N):
         z, w, A = TrueRandSampleHat(L)

@@ -5,16 +5,17 @@ import time
 import argparse
 from scipy.linalg import sqrtm
 from scipy.optimize import minimize
+from scipy.special import softplus
 from numba import njit
 from mpi4py import MPI
 
 # Basic math functions for the State Evolution loop functions
 
 def Loss(y, z):
-    return (y - z[0])*(y - z[0])
+    return ((y - z[0])*(y - z[0])/(softplus(z[1])) + np.log(softplus(z[1])))/2
 
 def Prox(mu, Omega, f, StartPoint):
-    ToOptimize = lambda x: np.einsum("i,ij,j->",(x - mu),linalg.inv(Omega), (x - mu))/2 + f(x)
+    ToOptimize = lambda x: np.einsum("i,ij,j->",(x - mu), linalg.inv(Omega), (x - mu))/2 + f(x)
     Proximal = minimize(ToOptimize, x0=StartPoint)
     return Proximal.x
 
@@ -29,7 +30,7 @@ def fc(SigmaInv, Lambda):
     return linalg.inv(SigmaInv + Lambda*np.eye(2))
 
 def phi(z, A):
-    return z[0]
+    return z[0] + A*np.sqrt(softplus(z[1]))
 
 def gout(zStar, w, V):
     return linalg.inv(V) @ (zStar - w)
@@ -95,12 +96,7 @@ def TrueRandExpectHat(q, m, sigma, alpha, Nsample):
     L = linalg.cholesky(Sigma)
     for _ in range(local_N):
         z, w, A = TrueRandSampleHat(L)
-        # Normal Calculations
-        #newqhat, newmhat, newminuschihat = HatFuncsOriginal(sigma, z, w, A)
-        # With Stein's Lemma
         newqhat, newmhat, newminuschihat = HatFuncsSteins(sigma, z, w, A, linalg.inv(Sigma))
-        # With Finite Differences
-        #newqhat, newmhat, newminuschihat = HatFuncsFiniteDifferences(sigma, z, w, A)
         qhat += newqhat
         mhat += newmhat
         chihat -= newminuschihat
@@ -148,7 +144,10 @@ def main():
     rank = comm.Get_rank()
 
     parser = argparse.ArgumentParser(description="Run State Evolution ERM with MPI")
-    parser.add_argument("--alpha", type=float, default=10, help="Value of alpha")
+    parser.add_argument("--BatchSize", type=int, default=100, help="Number of simulations in batch")
+    parser.add_argument("--nBatch", type=int, default=0, help="Number of the simulation in batch")
+    parser.add_argument("--alphaMin", type=float, default=1e-1, help="Value of alpha's start")
+    parser.add_argument("--alphaMax", type=float, default=1e1, help="Value of alpha's end")
     parser.add_argument("--Lambda", type=float, default=1, help="Value of Lambda")
     parser.add_argument("--Damping", type=float, default=0, help="Damping coefficient")
     parser.add_argument("--Nsample", type=int, default=10000, help="Total number of Monte Carlo samples")
@@ -159,11 +158,13 @@ def main():
     parser.add_argument("--Debug", action="store_true", help="Enable debug verbosity")
 
     args = parser.parse_args()
+    alphas = np.linspace(args.alphaMin, args.alphaMax, args.BatchSize)
+    alpha = alphas[args.nBatch]
 
     # Only rank 0 prints to avoid clutter
     if args.Verbose and rank == 0:
         print("Running State Evolution with MPI", flush=True)
-        print(f"Parameters: alpha={args.alpha}, Lambda={args.Lambda}, Nsample={args.Nsample}", flush=True)
+        print(f"Parameters: alpha={alpha}, Lambda={args.Lambda}, Nsample={args.Nsample}", flush=True)
 
     q0 = np.array([[0.64, 0.01], [0.01, 0.23]])#0.5*np.eye(2)
     m0 = np.array([[0.64, 0.01], [0.01, 0.16]])#0.2*np.eye(2)
@@ -171,7 +172,7 @@ def main():
 
     # Run the State Evolution algorithm
     StartTime = time.time()
-    q, varq, m, varm = TrueRandSE_ERM(args.alpha, args.Lambda, q0, m0, sigma0, Damping = args.Damping, Nsample = args.Nsample, MaxIter = args.MaxIter,
+    q, varq, m, varm = TrueRandSE_ERM(alpha, args.Lambda, q0, m0, sigma0, Damping = args.Damping, Nsample = args.Nsample, MaxIter = args.MaxIter,
                                 EpsConvergence = args.EpsConvergence, Verbose = args.Verbose, VerboseRate = args.VerboseRate,
                                 DebugVerbose = args.Debug)
 
@@ -181,10 +182,10 @@ def main():
         print("m =\n", m)
         print("Elapsed time : ", time.time() - StartTime)
     
-    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SimpleTest.txt", q, fmt="%.6f")
-    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SimpleTest.txt",  varq, fmt="%.6f")
-    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SimpleTest.txt", m, fmt="%.6f")
-    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SimpleTest.txt",  varm, fmt="%.6f")
+    np.savetxt(f"q_alpha_{alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt", q, fmt="%.6f")
+    np.savetxt(f"varq_alpha_{alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt",  varq, fmt="%.6f")
+    np.savetxt(f"m_alpha_{alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt", m, fmt="%.6f")
+    np.savetxt(f"varm_alpha_{alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt",  varm, fmt="%.6f")
 
 if __name__ == "__main__":
     main()
