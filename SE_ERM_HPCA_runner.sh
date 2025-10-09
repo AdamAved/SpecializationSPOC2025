@@ -20,8 +20,7 @@ module load openmpi
 source myenv/bin/activate
 cd SE_ERM
 
-alphamin = -1
-alphamax = 2
+alphamin=-1
+alphamax=2
 
-srun python test.py 
-python SE_ERM_HPCA.py --BatchSize 100 --nBatch ${SLURM_ARRAY_TASK_ID} --alphaMin $alphamin --alphaMax $alphamax --Damping 0.6 --Nsample 360000 --EpsConvergence 5e-4
+srun python SE_ERM_HPCA.py --BatchSize 100 --nBatch ${SLURM_ARRAY_TASK_ID} --alphaMin $alphamin --alphaMax $alphamax --Damping 0.6 --Nsample 360000 --EpsConvergence 5e-4
