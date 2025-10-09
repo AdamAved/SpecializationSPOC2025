@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --chdir /home/avedissi/PDM2025/Specialization2025
+#SBATCH --chdir /home/avedissi/PDM2025/SpecializationSPOC2025
 #SBATCH --job-name=test
 #SBATCH --array=0-127
 #SBATCH --output=SE_ERM_HPCA.out
@@ -20,5 +20,8 @@ module load openmpi
 source myenv/bin/activate
 cd SE_ERM
 
+alphamin = -1
+alphamax = 2
+
 srun python test.py 
-mpiexec -n 4 python SE_ERM_HPCA.py --BatchSize 100 --nBatch 0 --alphaMin -1 --alphaMax 2 --Damping 0.6 --Nsample 360000 --EpsConvergence 5e-4
+python SE_ERM_HPCA.py --BatchSize 100 --nBatch ${SLURM_ARRAY_TASK_ID} --alphaMin $alphamin --alphaMax $alphamax --Damping 0.6 --Nsample 360000 --EpsConvergence 5e-4
