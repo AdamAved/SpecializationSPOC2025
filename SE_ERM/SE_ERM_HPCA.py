@@ -158,7 +158,7 @@ def main():
     parser.add_argument("--Debug", action="store_true", help="Enable debug verbosity")
 
     args = parser.parse_args()
-    alphas = np.linspace(args.alphaMin, args.alphaMax, args.BatchSize)
+    alphas = np.logspace(args.alphaMin, args.alphaMax, args.BatchSize)
     alpha = alphas[args.nBatch]
 
     # Only rank 0 prints to avoid clutter
