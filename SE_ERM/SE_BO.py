@@ -32,7 +32,7 @@ def z_avg_out(y, w, V, IntBoundaries):
     return np.array([nquad(Integrand_z_avg, [[-IntBoundaries, IntBoundaries],[-IntBoundaries, IntBoundaries]], args=(y, w, V, i))[0] for i in range(2)]) / Z_out(y, w, V, IntBoundaries)
 
 def T(qhat, W, xi):
-    return W + sqrtm(qhat).real @ xi
+    return W + sqrtm(linalg.inv(qhat)).real @ xi
 
 def fw(R, SigmaInv):
     return linalg.inv(SigmaInv + np.eye(2)) @ SigmaInv @ R
