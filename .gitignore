@@ -1,1 +1,6 @@
 myenv/
+.local/
+*.txt
+*.err
+*.out
+*.zip
