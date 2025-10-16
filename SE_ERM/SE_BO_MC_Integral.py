@@ -129,10 +129,14 @@ def TrueRandSE_BO(alpha, q0, Damping, Nsample, IntSamples, MaxIter, EpsConvergen
             print("Iteration time : ", IterTime, flush=True)
         if rank == 0:
             with h5py.File(FileNameQ, "a") as f:
-                dset = f[FileNameQ]
-                n = dset.shape[0]
-                dset.resize(n + 1, axis=0)
-                dset[n, :, :] = q
+                QBO = f["q_BO"]
+                vQBO = f["varq_BO"]
+                n = QBO.shape[2]
+                QBO.resize(n + 1, axis=2)
+                vQBO.resize(n + 1, axis=2)
+                QBO[:, :, n] = q
+                vQBO[:, :, n] = varq
+
         NIter += 1
     return q, varq
 
@@ -162,10 +166,11 @@ def main():
     m0 = np.array([[0.64, 0.01], [0.01, 0.16]])#0.2*np.eye(2)
     sigma0 = 0.5*np.eye(2)
 
-    filenameQ = f"q_alpha_{args.alpha:.5f}_Samples_{args.Nsample:.5f}_SE_BO.mat"
+    filenameQ = f"SE_BO_{args.alpha:.5f}_Samples_{args.Nsample:.5f}.mat"
     if rank == 0:
         with h5py.File(filenameQ, "w") as f:
-            dset = f.create_dataset("q_BO", shape=(0, 2, 2), maxshape=(None, 2, 2), dtype='float64')
+            f.create_dataset("q_BO", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
+            f.create_dataset("varq_BO", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
 
     # Run the State Evolution algorithm
     StartTime = time.time()
@@ -176,11 +181,8 @@ def main():
     if rank == 0:
         print("Final Results:")
         print("q =\n", q)
-        print("m =\n", m)
+        print("varq =\n", varq)
         print("Elapsed time : ", time.time() - StartTime)
-    
-    np.savetxt(f"q_alpha_{args.alpha}_Samples_{args.Nsample}_SE_BO.txt", q, fmt="%.6f")
-    np.savetxt(f"varq_alpha_{args.alpha}_Samples_{args.Nsample}_SE_BO.txt",  varq, fmt="%.6f")
 
 if __name__ == "__main__":
     main()
