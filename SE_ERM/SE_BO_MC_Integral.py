@@ -137,7 +137,7 @@ def main():
     parser.add_argument("--alpha", type=float, default=10, help="Value of alpha")
     parser.add_argument("--Damping", type=float, default=0, help="Damping coefficient")
     parser.add_argument("--Nsample", type=int, default=10000, help="Total number of Monte Carlo samples")
-    parser.add_argument("--IntSamples", type=float, default=20, help="Number of MC samples for integral")
+    parser.add_argument("--IntSamples", type=int, default=20, help="Number of MC samples for integral")
     parser.add_argument("--MaxIter", type=int, default=1e4, help="Maximum number of SE iterations")
     parser.add_argument("--EpsConvergence", type=float, default=1e-6, help="Convergence threshold")
     parser.add_argument("--Verbose", action="store_true", help="Enable verbose output")
