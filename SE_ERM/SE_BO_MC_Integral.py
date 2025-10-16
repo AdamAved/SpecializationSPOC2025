@@ -3,6 +3,7 @@ import numpy.random as rnd
 import numpy.linalg as linalg
 import time
 import argparse
+import h5py
 from scipy.integrate import nquad
 from scipy.linalg import sqrtm
 from scipy.stats import norm, multivariate_normal
@@ -101,7 +102,7 @@ def TrueRandExpectHat(q, alpha, Nsample, IntSamples):
 
 # State Evolution runner
 
-def TrueRandSE_BO(alpha, q0, Damping, Nsample, IntSamples, MaxIter, EpsConvergence, Verbose, VerboseRate, DebugVerbose):
+def TrueRandSE_BO(alpha, q0, Damping, Nsample, IntSamples, MaxIter, EpsConvergence, Verbose, VerboseRate, DebugVerbose, FileNameQ):
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
@@ -126,6 +127,12 @@ def TrueRandSE_BO(alpha, q0, Damping, Nsample, IntSamples, MaxIter, EpsConvergen
             print("q", q, flush=True)
             print("Eigenvalues of Q", linalg.eigvals(np.vstack([np.hstack([np.eye(2), q]), np.hstack([q, q])])), flush=True)
             print("Iteration time : ", IterTime, flush=True)
+        if rank == 0:
+            with h5py.File(FileNameQ, "a") as f:
+                dset = f[FileNameQ]
+                n = dset.shape[0]
+                dset.resize(n + 1, axis=0)
+                dset[n, :, :] = q
         NIter += 1
     return q, varq
 
@@ -155,11 +162,16 @@ def main():
     m0 = np.array([[0.64, 0.01], [0.01, 0.16]])#0.2*np.eye(2)
     sigma0 = 0.5*np.eye(2)
 
+    filenameQ = f"q_alpha_{args.alpha:.5f}_Samples_{args.Nsample:.5f}_SE_BO.mat"
+    if rank == 0:
+        with h5py.File(filenameQ, "w") as f:
+            dset = f.create_dataset("q_BO", shape=(0, 2, 2), maxshape=(None, 2, 2), dtype='float64')
+
     # Run the State Evolution algorithm
     StartTime = time.time()
     q, varq = TrueRandSE_BO(args.alpha, q0, Damping = args.Damping, Nsample = args.Nsample, IntSamples = np.abs(args.IntSamples), MaxIter = args.MaxIter,
                                 EpsConvergence = args.EpsConvergence, Verbose = args.Verbose, VerboseRate = args.VerboseRate,
-                                DebugVerbose = args.Debug)
+                                DebugVerbose = args.Debug, FileNameQ = filenameQ)
 
     if rank == 0:
         print("Final Results:")
