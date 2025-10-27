@@ -4,3 +4,4 @@ myenv/
 *.err
 *.out
 *.zip
+*.mat

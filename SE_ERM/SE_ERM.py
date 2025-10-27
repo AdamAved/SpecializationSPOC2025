@@ -3,10 +3,10 @@ import numpy.random as rnd
 import numpy.linalg as linalg
 import time
 import argparse
+import h5py
 from scipy.linalg import sqrtm
 from scipy.optimize import minimize
 from scipy.special import softplus
-from numba import njit
 from mpi4py import MPI
 
 # Basic math functions for the State Evolution loop functions
@@ -24,10 +24,10 @@ def T(mhat, qhat, chihat, W, xi):
     return linalg.inv(chihat) @ (mhat @ W + sqrtqhat @ xi)
 
 def fw(R, SigmaInv, Lambda):
-    return linalg.inv(SigmaInv + Lambda*np.eye(2)) @ SigmaInv @ R
+    return linalg.inv(SigmaInv + np.diag(Lambda)) @ SigmaInv @ R
 
 def fc(SigmaInv, Lambda):
-    return linalg.inv(SigmaInv + Lambda*np.eye(2))
+    return linalg.inv(SigmaInv + np.diag(Lambda))
 
 def phi(z, A):
     return z[0] + A*np.sqrt(softplus(z[1]))
@@ -107,7 +107,7 @@ def TrueRandExpectHat(q, m, sigma, alpha, Nsample):
 
 # State Evolution runner
 
-def TrueRandSE_ERM(alpha, Lambda, q0, m0, sigma0, Damping, Nsample, MaxIter, EpsConvergence, Verbose, VerboseRate, DebugVerbose):
+def TrueRandSE_ERM(alpha, Lambda, q0, m0, sigma0, Damping, Nsample, MaxIter, EpsConvergence, Verbose, VerboseRate, DebugVerbose, FileName):
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
@@ -136,6 +136,25 @@ def TrueRandSE_ERM(alpha, Lambda, q0, m0, sigma0, Damping, Nsample, MaxIter, Eps
             print("sigma", sigma, flush=True)
             print("Eigenvalues of Q", linalg.eigvals(np.vstack([np.hstack([np.eye(2), m]), np.hstack([m, q])])), flush=True)
             print("Iteration time : ", IterTime, flush=True)
+        if rank == 0:
+            with h5py.File(FileName, "a") as f:
+                QERM = f["q_ERM"]
+                MERM = f["m_ERM"]
+                SERM = f["sigma_ERM"]
+                vQERM = f["varq_ERM"]
+                vMERM = f["varm_ERM"]
+                n = QERM.shape[2]
+                QERM.resize(n + 1, axis=2)
+                MERM.resize(n + 1, axis=2)
+                SERM.resize(n + 1, axis=2)
+                vQERM.resize(n + 1, axis=2)
+                vMERM.resize(n + 1, axis=2)
+                QERM[:, :, n] = q
+                MERM[:, :, n] = m
+                SERM[:, :, n] = sigma
+                vQERM[:, :, n] = varq
+                vMERM[:, :, n] = varm
+
         NIter += 1
     return q, varq, m, varm
 
@@ -145,10 +164,11 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run State Evolution ERM with MPI")
     parser.add_argument("--alpha", type=float, default=10, help="Value of alpha")
-    parser.add_argument("--Lambda", type=float, default=1, help="Value of Lambda")
+    parser.add_argument("--Lambda0", type=float, default=1, help="Value of Lambda0")
+    parser.add_argument("--Lambda1", type=float, default=1, help="Value of Lambda1")
     parser.add_argument("--Damping", type=float, default=0, help="Damping coefficient")
     parser.add_argument("--Nsample", type=int, default=10000, help="Total number of Monte Carlo samples")
-    parser.add_argument("--MaxIter", type=int, default=1e4, help="Maximum number of SE iterations")
+    parser.add_argument("--MaxIter", type=int, default=1e2, help="Maximum number of SE iterations")
     parser.add_argument("--EpsConvergence", type=float, default=1e-6, help="Convergence threshold")
     parser.add_argument("--Verbose", action="store_true", help="Enable verbose output")
     parser.add_argument("--VerboseRate", type=int, default=1, help="Frequence of outputs, if verbose is enabled")
@@ -165,22 +185,26 @@ def main():
     m0 = np.array([[0.64, 0.01], [0.01, 0.16]])#0.2*np.eye(2)
     sigma0 = 0.5*np.eye(2)
 
+    filename = f"SE_ERM_{args.alpha:.5f}_Lambda0_{args.Lambda0:.5f}_Lambda1_{args.Lambda1:.5f}_Samples_{args.Nsample:.5f}.mat"
+    if rank == 0:
+        with h5py.File(filename, "w") as f:
+            f.create_dataset("q_ERM", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
+            f.create_dataset("m_ERM", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
+            f.create_dataset("sigma_ERM", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
+            f.create_dataset("varq_ERM", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
+            f.create_dataset("varm_ERM", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
+
     # Run the State Evolution algorithm
     StartTime = time.time()
-    q, varq, m, varm = TrueRandSE_ERM(args.alpha, args.Lambda, q0, m0, sigma0, Damping = args.Damping, Nsample = args.Nsample, MaxIter = args.MaxIter,
+    q, varq, m, varm = TrueRandSE_ERM(args.alpha, np.array([args.Lambda0, args.Lambda1]), q0, m0, sigma0, Damping = args.Damping, Nsample = args.Nsample, MaxIter = args.MaxIter,
                                 EpsConvergence = args.EpsConvergence, Verbose = args.Verbose, VerboseRate = args.VerboseRate,
-                                DebugVerbose = args.Debug)
+                                DebugVerbose = args.Debug, FileName = filename)
 
     if rank == 0:
         print("Final Results:")
         print("q =\n", q)
         print("m =\n", m)
         print("Elapsed time : ", time.time() - StartTime)
-    
-    np.savetxt(f"q_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt", q, fmt="%.6f")
-    np.savetxt(f"varq_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt",  varq, fmt="%.6f")
-    np.savetxt(f"m_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt", m, fmt="%.6f")
-    np.savetxt(f"varm_alpha_{args.alpha}_Lambda_{args.Lambda}_Samples_{args.Nsample}_SE_ERM.txt",  varm, fmt="%.6f")
 
 if __name__ == "__main__":
     main()

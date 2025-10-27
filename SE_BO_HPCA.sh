@@ -20,4 +20,4 @@ module load openmpi
 source myenv/bin/activate
 cd SE_ERM
 
-srun python SE_BO.py --IntBoundaries 10 --alpha 1 --Damping 0.6 --Nsample 360 --EpsConvergence 1e-3 --Verbose --Debug
+srun python SE_BO_MC_Integral.py --IntSamples 1000 --alpha 1 --Damping 0.6 --Nsample 1800 --MaxIter 10 --EpsConvergence 1e-6 --Verbose --Debug

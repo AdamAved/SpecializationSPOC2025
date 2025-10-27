@@ -102,7 +102,7 @@ def TrueRandExpectHat(q, alpha, Nsample, IntSamples):
 
 # State Evolution runner
 
-def TrueRandSE_BO(alpha, q0, Damping, Nsample, IntSamples, MaxIter, EpsConvergence, Verbose, VerboseRate, DebugVerbose, FileNameQ):
+def TrueRandSE_BO(alpha, q0, Damping, Nsample, IntSamples, MaxIter, EpsConvergence, Verbose, VerboseRate, DebugVerbose, FileName):
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
 
@@ -128,7 +128,7 @@ def TrueRandSE_BO(alpha, q0, Damping, Nsample, IntSamples, MaxIter, EpsConvergen
             print("Eigenvalues of Q", linalg.eigvals(np.vstack([np.hstack([np.eye(2), q]), np.hstack([q, q])])), flush=True)
             print("Iteration time : ", IterTime, flush=True)
         if rank == 0:
-            with h5py.File(FileNameQ, "a") as f:
+            with h5py.File(FileName, "a") as f:
                 QBO = f["q_BO"]
                 vQBO = f["varq_BO"]
                 n = QBO.shape[2]
@@ -166,17 +166,17 @@ def main():
     m0 = np.array([[0.64, 0.01], [0.01, 0.16]])#0.2*np.eye(2)
     sigma0 = 0.5*np.eye(2)
 
-    filenameQ = f"SE_BO_{args.alpha:.5f}_Samples_{args.Nsample:.5f}.mat"
+    filename = f"SE_BO_{args.alpha:.5f}_Samples_{args.Nsample:.5f}.mat"
     if rank == 0:
-        with h5py.File(filenameQ, "w") as f:
+        with h5py.File(filename, "w") as f:
             f.create_dataset("q_BO", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
             f.create_dataset("varq_BO", shape=(2, 2, 0), maxshape=(2, 2, None), dtype='float64')
-
+            
     # Run the State Evolution algorithm
     StartTime = time.time()
     q, varq = TrueRandSE_BO(args.alpha, q0, Damping = args.Damping, Nsample = args.Nsample, IntSamples = np.abs(args.IntSamples), MaxIter = args.MaxIter,
                                 EpsConvergence = args.EpsConvergence, Verbose = args.Verbose, VerboseRate = args.VerboseRate,
-                                DebugVerbose = args.Debug, FileNameQ = filenameQ)
+                                DebugVerbose = args.Debug, FileName = filename)
 
     if rank == 0:
         print("Final Results:")
