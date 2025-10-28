@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --chdir /home/avedissi/PDM2025/SpecializationSPOC2025
 #SBATCH --job-name=SE_ERM
-#SBATCH --array=0-0
+#SBATCH --array=0-60
 #SBATCH --output=SE_ERM_HPCA.out
 #SBATCH --error=SE_ERM_HPCA.err
 #SBATCH --ntasks=36
