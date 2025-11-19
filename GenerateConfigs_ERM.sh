@@ -7,20 +7,18 @@ module load python
 source myenv/bin/activate
 
 # Generate log-spaced values using Python
-lambda_0=1 # ($(python3 -c "import numpy as np; print(' '.join(map(str, np.logspace(-1, 1, 11))))"))
-lambda_1=1 # ($(python3 -c "import numpy as np; print(' '.join(map(str, np.logspace(-1, 1, 11))))"))
-alpha=($(python3 -c "import numpy as np; print(' '.join(map(str, np.logspace(-1, 2, 61))))"))
+# lambda=1 # ($(python3 -c "import numpy as np; print(' '.join(map(str, np.logspace(-1, 1, 11))))"))
+lambda=($(python3 -c "import numpy as np; print(' '.join(map(str, np.logspace(-1, 1, 41))))"))
+alpha=5 # ($(python3 -c "import numpy as np; print(' '.join(map(str, np.logspace(-1, 1.62, 10))))"))
 
 # Output file
-outfile="Params_Alpha_Scan.txt"
+outfile="Params_Lambda_Scan_Basic.txt"
 > "$outfile"  # clear or create file
 
 # Generate combinations
 for a in "${alpha[@]}"; do
-    for l0 in "${lambda_0[@]}"; do
-        for l1 in "${lambda_1[@]}"; do
-            echo "$a $l0 $l1" >> "$outfile"
-        done
+    for l in "${lambda[@]}"; do
+        echo "$a $l $l" >> "$outfile"
     done
 done
 

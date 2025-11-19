@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --chdir /home/avedissi/PDM2025/SpecializationSPOC2025
 #SBATCH --job-name=SE_BO
-#SBATCH --array=0-61
+#SBATCH --array=0-0
 #SBATCH --output=SE_BO_HPCA.out
 #SBATCH --error=SE_BO_HPCA.err
 #SBATCH --ntasks=36
@@ -18,7 +18,7 @@ module load openmpi
 
 # Activate the environment
 source myenv/bin/activate
-read alpha lambda0 lambda1 <<< $(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" Params_Alpha_Scan.txt)
+#read alpha lambda0 lambda1 <<< $(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" Params_Alpha_Scan.txt)
 cd SE_BO
 
-srun python SE_BO_MC_Integral.py --IntSamples 1000 --alpha $alpha --Damping 0.6 --Nsample 3600 --MaxIter 50 --EpsConvergence 1e-6
+srun python SE_BO_MC_Integral.py --IntSamples 1000 --alpha 5 --Damping 0.6 --Nsample 3600 --MaxIter 50 --EpsConvergence 1e-6
