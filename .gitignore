@@ -5,3 +5,4 @@ myenv/
 *.out
 *.zip
 *.mat
+!Raw_Data/*
